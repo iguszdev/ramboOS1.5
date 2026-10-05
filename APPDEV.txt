@@ -1,0 +1,71 @@
+Writing your own app for RamboOS
+==================================
+
+RamboOS has a real "run" command that loads and executes a program
+you write yourself, from its own reserved slot on the disk image.
+This isn't a simulation - it's actual machine code, assembled by you,
+loaded by the bootloader's kernel via a real BIOS disk read, and
+executed with a real x86 far call.
+
+HOW IT WORKS
+------------
+- The disk image reserves 20 sectors (10KB) starting right after the
+  kernel, at LBA 41, for exactly one app.
+- When you type "run" in RamboOS, the kernel reads those 20 sectors
+  into memory at segment 0x1000, offset 0, and does:
+      call 0x1000:0x0000
+  Your app runs from there with full access to BIOS interrupts
+  (screen, keyboard, disk, timer, etc - anything a real-mode program
+  can normally use).
+- When your app is done, it MUST return with a plain "retf" (far
+  return) instruction. That hands control cleanly back to RamboOS,
+  which then keeps running normally.
+
+WRITING AN APP
+--------------
+1. Write your program in x86 assembly (NASM syntax), 16-bit real mode,
+   assembled as a flat binary with ORG 0x0000 (see demo-app.asm for a
+   full working example).
+
+2. At the very start of your app, set up your own DS/ES, since
+   RamboOS's segment registers aren't guaranteed to match yours:
+
+       mov ax, cs
+       mov ds, ax
+       mov es, ax
+
+3. Do whatever you want - print things, read the keyboard, beep the
+   speaker, read the clock, etc. Stick to BIOS interrupts (int 0x10,
+   0x16, 0x1A, 0x13...) rather than touching hardware directly unless
+   you know what you're doing.
+
+4. End your program with:
+
+       retf
+
+   Don't use "int 0x20" or "hlt" to exit - use retf, since your app
+   was entered with a far CALL and RamboOS expects a matching return.
+
+5. Keep your app under 10240 bytes (20 sectors). demo-app.asm is a
+   good template - just copy it and start editing.
+
+ASSEMBLING AND INSTALLING YOUR APP
+-----------------------------------
+1. Assemble it to a flat binary:
+
+       nasm -f bin myapp.asm -o myapp.bin
+
+2. Write it into the app slot of ramboos.img, which starts at byte
+   offset 41 * 512 = 20992:
+
+       dd if=myapp.bin of=ramboos.img conv=notrunc bs=512 seek=41
+
+   (conv=notrunc is important - without it, dd will truncate the
+   rest of the disk image!)
+
+3. Boot ramboos.img and type "run". Your app runs.
+
+That's it - there's no compiler, no SDK, no permission system. If you
+can write x86 assembly, RamboOS will run it. That's kind of the whole
+point: it's a real, small, honest little OS, and now it's yours to
+extend too.
